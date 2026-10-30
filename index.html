@@ -1,0 +1,723 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Trenes Renfe en tiempo real</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css">
+<style>
+  :root{
+    --bg:#0f1720; --panel:#16212d; --panel2:#1d2b3a; --line:#2b3d52; --txt:#e7eef6; --mut:#8aa0b6;
+    --acc:#e4002b; --ok:#2fbf71; --warn:#f0a020; --cer:#2e9bff; --early:#19c3c3; --na:#8aa0b6;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%;margin:0;background:var(--bg);color:var(--txt);font:14px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  #app{display:grid;grid-template-columns:350px 1fr;height:100%}
+  aside{background:var(--panel);border-right:1px solid var(--line);display:flex;flex-direction:column;min-height:0;overflow:hidden}
+  #scroll{overflow:auto;flex:0 1 auto;max-height:62%}
+  header{padding:14px 16px 10px;border-bottom:1px solid var(--line)}
+  h1{font-size:17px;margin:0 0 2px;display:flex;align-items:center;gap:8px}
+  h1 i{display:inline-block;width:10px;height:10px;border-radius:50%;background:var(--acc)}
+  .sub{color:var(--mut);font-size:12px}
+  .box{padding:11px 16px;border-bottom:1px solid var(--line)}
+  .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .row.nw{flex-wrap:nowrap}
+  label.chk{display:flex;align-items:center;gap:6px;cursor:pointer;user-select:none}
+  input[type=search],select{width:100%;background:var(--panel2);border:1px solid var(--line);color:var(--txt);border-radius:8px;padding:7px 9px;font:inherit}
+  input[type=search]:focus,select:focus{outline:2px solid var(--cer);outline-offset:0}
+  button{background:var(--panel2);border:1px solid var(--line);color:var(--txt);border-radius:8px;padding:7px 12px;font:inherit;cursor:pointer}
+  button:hover{border-color:var(--mut)}
+  button.pri{background:var(--acc);border-color:var(--acc);font-weight:600}
+  .stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+  .stats+.stats{margin-top:8px}
+  .stat{background:var(--panel2);border-radius:8px;padding:7px 10px}
+  .stat b{display:block;font-size:19px;font-variant-numeric:tabular-nums}
+  .stat span{color:var(--mut);font-size:11px}
+  #status{display:flex;align-items:flex-start;gap:8px;font-size:12px;color:var(--mut)}
+  #status .led{flex:none;margin-top:4px;width:8px;height:8px;border-radius:50%;background:var(--mut)}
+  #status.ok .led{background:var(--ok)} #status.err .led{background:var(--acc)} #status.demo .led{background:var(--warn)}
+  #list{flex:1;overflow:auto;min-height:120px;border-top:1px solid var(--line)}
+  .item{padding:7px 16px;border-bottom:1px solid #1f2e3f;cursor:pointer;display:flex;gap:10px;align-items:center}
+  .item:hover,.item.sel{background:var(--panel2)}
+  .badge{min-width:44px;text-align:center;border-radius:6px;padding:2px 6px;font-weight:700;font-size:11.5px;color:#fff;text-shadow:0 1px 1px #0006}
+  .item .t{flex:1;min-width:0}
+  .item .t div:first-child{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .item .t div:last-child{color:var(--mut);font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .dl{font-weight:700;font-variant-numeric:tabular-nums;font-size:12.5px;min-width:44px;text-align:right}
+  .dl-ok{color:var(--ok)}.dl-warn{color:var(--warn)}.dl-bad{color:#ff5470}.dl-early{color:var(--early)}.dl-na{color:var(--na);font-weight:400}
+  #map{height:100%;background:#cfd6dd}
+  .leaflet-container{font:inherit}
+  .leaflet-popup-content-wrapper,.leaflet-popup-tip{background:var(--panel);color:var(--txt)}
+  .leaflet-popup-content{margin:12px 14px;min-width:220px}
+  .pop h3{margin:0 0 2px;font-size:15px}
+  .pop .big{font-size:15px;font-weight:700;margin:0 0 8px}
+  .pop table{border-collapse:collapse;width:100%}
+  .pop td{padding:2px 0;vertical-align:top}.pop td:first-child{color:var(--mut);padding-right:12px;white-space:nowrap}
+  .note{padding:9px 16px;color:var(--mut);font-size:11.5px;border-top:1px solid var(--line)}
+  .note a,.sub a{color:var(--cer);text-decoration:none}
+  .tiles-gray{filter:grayscale(1) brightness(1.08) contrast(.9)}
+  .tiles-dark{filter:invert(1) hue-rotate(180deg) grayscale(.55) brightness(.82) contrast(.95)}
+  .chips{display:flex;flex-wrap:wrap;gap:5px}
+  .chip{display:inline-flex;align-items:center;gap:5px;border:1px solid var(--line);background:var(--panel2);color:var(--txt);border-radius:999px;padding:3px 9px 3px 7px;font-size:12px;cursor:pointer;user-select:none}
+  .chip i{width:9px;height:9px;border-radius:50%;display:inline-block}
+  .chip em{font-style:normal;color:var(--mut);font-variant-numeric:tabular-nums}
+  .chip.zero{opacity:.55}
+  .chip.off{opacity:.35}.chip.off i{background:transparent!important;outline:1px solid var(--mut)}
+  /* etiquetas junto al tren */
+  .leaflet-tooltip.tlabel{background:#fff;color:#16212d;border:0;border-left:4px solid var(--na);border-radius:4px;padding:1px 6px 1px 5px;font:12px/1.35 system-ui,sans-serif;box-shadow:0 1px 5px #0007;white-space:nowrap}
+  .leaflet-tooltip.tlabel:before{display:none}
+  .tlabel b{font-weight:700}
+  .tl-ok{border-left-color:var(--ok)!important}.tl-warn{border-left-color:var(--warn)!important}.tl-bad{border-left-color:#e4002b!important}
+  .tl-early{border-left-color:var(--early)!important}.tl-na{border-left-color:var(--na)!important}
+  .tlabel .d{font-weight:700;margin-left:3px}
+  .tl-ok .d{color:#1c8f55}.tl-warn .d{color:#b8740a}.tl-bad .d{color:#d1001f}.tl-early .d{color:#0c8d8d}.tl-na .d{color:#6b7f93;font-weight:400}
+  #railbanner{display:none;position:absolute;z-index:900;left:12px;bottom:28px;max-width:min(520px,80%);background:#16212dee;color:#e7eef6;border:1px solid #2b3d52;border-radius:8px;padding:8px 12px;font-size:12.5px;box-shadow:0 2px 10px #0006}
+  #toggle{display:none}
+  @media (max-width:760px){
+    #app{grid-template-columns:1fr;grid-template-rows:1fr}
+    aside{position:absolute;z-index:1000;left:0;top:0;bottom:0;width:min(350px,90vw);transform:translateX(-100%);transition:transform .2s}
+    aside.open{transform:none;box-shadow:0 0 40px #000a}
+    #toggle{display:block;position:absolute;z-index:999;left:10px;top:10px}
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <aside id="side">
+    <div id="scroll">
+    <header>
+      <h1><i></i>Trenes Renfe</h1>
+      <div class="sub">Posición y puntualidad en tiempo real · península ibérica</div>
+    </header>
+
+    <div class="box"><div id="status"><span class="led"></span><span id="statusTxt">Iniciando…</span></div></div>
+
+    <div class="box">
+      <div class="stats">
+        <div class="stat"><b id="nAll">–</b><span>trenes</span></div>
+        <div class="stat"><b id="nCer">–</b><span>Cercanías</span></div>
+        <div class="stat"><b id="nLar">–</b><span>Larga/Media</span></div>
+      </div>
+      <div class="stats">
+        <div class="stat"><b id="nDel">–</b><span>con retraso ≥ 5′</span></div>
+        <div class="stat"><b id="nAvg">–</b><span>retraso medio</span></div>
+        <div class="stat"><b id="nKnown">–</b><span>con dato</span></div>
+      </div>
+    </div>
+
+    <div class="box">
+      <div class="sub" style="margin-bottom:6px;display:flex;justify-content:space-between;align-items:center">
+        <span>Tipo de tren</span>
+        <span><a href="#" id="tAll">todos</a> · <a href="#" id="tNone">ninguno</a></span>
+      </div>
+      <div id="types" class="chips"></div>
+    </div>
+
+    <div class="box">
+      <div class="row nw" style="margin-bottom:8px">
+        <select id="colorby" title="Colorear los puntos por…">
+          <option value="type">Color: tipo de tren</option>
+          <option value="delay">Color: retraso</option>
+        </select>
+        <select id="labels" title="Etiquetas junto al tren (código y retraso)">
+          <option value="auto">Etiquetas: auto</option>
+          <option value="all">Etiquetas: todas</option>
+          <option value="none">Etiquetas: no</option>
+        </select>
+      </div>
+      <div class="row nw" style="margin-bottom:8px">
+        <select id="dfilter" title="Filtrar por retraso">
+          <option value="all">Retraso: todos</option>
+          <option value="5">Retraso ≥ 5′</option>
+          <option value="15">Retraso ≥ 15′</option>
+          <option value="30">Retraso ≥ 30′</option>
+          <option value="early">Adelantados</option>
+          <option value="nodata">Sin dato</option>
+        </select>
+        <select id="sort" title="Orden de la lista">
+          <option value="line">Orden: línea</option>
+          <option value="late">Orden: más retraso</option>
+          <option value="early">Orden: más adelanto</option>
+        </select>
+      </div>
+      <div class="row" style="margin-bottom:8px">
+        <input type="search" id="q" placeholder="Buscar nº de tren, línea, destino, parada…" autocomplete="off">
+      </div>
+      <div class="row">
+        <select id="line"><option value="">Todas las líneas</option></select>
+      </div>
+    </div>
+
+    <div class="box">
+      <div class="row nw" style="margin-bottom:8px">
+        <select id="railsrc">
+          <option value="orm">Vías: OpenRailwayMap</option>
+          <option value="server">Vías: vectoriales (servidor)</option>
+          <option value="overpass">Vías: vectoriales por zona</option>
+          <option value="none">Vías: ocultas</option>
+        </select>
+        <select id="basemap">
+          <option value="light">Mapa gris</option>
+          <option value="dark">Mapa oscuro</option>
+          <option value="osm">Mapa en color</option>
+        </select>
+      </div>
+      <div class="sub" id="railhint"></div>
+    </div>
+
+    <div class="box">
+      <div class="row" style="justify-content:space-between">
+        <span class="row nw" style="gap:6px">
+          <label class="chk"><input type="checkbox" id="auto" checked>Auto</label>
+          <select id="every" style="width:auto;padding:5px 7px" title="Renfe publica datos nuevos cada ~30 s">
+            <option value="15">cada 15 s</option><option value="30" selected>cada 30 s</option>
+            <option value="60">cada 1 min</option><option value="120">cada 2 min</option>
+          </select>
+        </span>
+        <span class="row"><button id="demo" title="Datos simulados para probar la interfaz">Demo</button><button id="reload" class="pri">Actualizar</button></span>
+      </div>
+    </div>
+    </div>
+
+    <div id="list"></div>
+
+    <div class="note">
+      Datos abiertos de Renfe (<a href="https://data.renfe.com" target="_blank" rel="noopener">data.renfe.com</a>).
+      Mapa y vías © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>.
+    </div>
+  </aside>
+  <main style="position:relative;min-height:0"><button id="toggle">☰ Panel</button><div id="map"></div><div id="railbanner"></div></main>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
+<script>
+(() => {
+  'use strict';
+  const API = { cercanias: 'api/cercanias', larga: 'api/larga' };
+  // Si la página se abre sin el servidor local, se intenta el feed directo (sin tipo ni retraso).
+  const DIRECT = { cercanias: 'https://gtfsrt.renfe.com/vehicle_positions.json',
+                   larga: 'https://gtfsrt.renfe.com/vehicle_positions_LD.json' };
+
+  const $ = id => document.getElementById(id);
+  const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const pick = (o, ...ks) => { for (const k of ks) if (o && o[k] != null) return o[k]; };
+
+  /* ===================== mapa ===================== */
+  const IBERIA = L.latLngBounds([35.6, -9.9], [44.0, 4.6]);
+  const map = L.map('map', { preferCanvas: true, zoomControl: true, minZoom: 5, maxZoom: 18,
+                             maxBounds: IBERIA.pad(.25), maxBoundsViscosity: .8 });
+  map.fitBounds(IBERIA);
+  // Todos los fondos son teselas estándar de OpenStreetMap (sin clave); gris y oscuro con filtros CSS.
+  const osmTiles = cls => L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19, className: cls, attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>' });
+  const BASES = { light: osmTiles('tiles-gray'), dark: osmTiles('tiles-dark'), osm: osmTiles('') };
+  let baseName = 'light';
+  let base = BASES.light.addTo(map);
+
+  /* ===================== vías ===================== */
+  map.createPane('rail'); map.getPane('rail').style.zIndex = 350;
+  const railVec = L.layerGroup().addTo(map);
+  const railRenderer = L.canvas({ pane: 'rail', padding: .3 });
+  const rails = L.tileLayer('https://{s}.tiles.openrailwaymap.org/standard/{z}/{x}/{y}.png', {
+    pane: 'rail', maxZoom: 19, subdomains: 'abc', opacity: .9,
+    attribution: '© <a href="https://www.openrailwaymap.org">OpenRailwayMap</a>' });
+  const RAIL_MIN_ZOOM = 8;
+  const OVERPASS = ['https://overpass-api.de/api/interpreter', 'https://overpass.private.coffee/api/interpreter', 'https://overpass.kumi.systems/api/interpreter'];
+  const railHint = { set textContent(t) {
+    $('railhint').textContent = t; const b = $('railbanner');
+    const fb = t && !/tramos/.test(t) && railSrc !== 'orm' && railSrc !== 'none' ? ' — mientras tanto se muestra OpenRailwayMap' : '';
+    b.textContent = t ? 'Vías: ' + t + fb : ''; b.style.display = t && !/tramos/.test(t) ? 'block' : 'none'; } };
+  let railSrc = 'orm', railReq = 0, railTimer = null, railRetry = null;
+  let railData = null;                 // {hs:[[ [lat,lon],... ]], std:[...]} del servidor
+  let railLines = null;                // capas dibujadas
+
+  // Mientras las vectoriales no están listas (o fallan) se muestra OpenRailwayMap para no quedarse sin vías.
+  function ormFallback(on) {
+    if (railSrc === 'none') return;
+    if (on || railSrc === 'orm') { if (!map.hasLayer(rails)) rails.addTo(map); }
+    else if (map.hasLayer(rails)) map.removeLayer(rails);
+  }
+  function railStyle() {
+    if (!railLines) return;
+    const z = map.getZoom(), dark = baseName === 'dark';
+    const w = z >= 13 ? 5 : z >= 11 ? 4 : z >= 9 ? 3.4 : z >= 7 ? 2.6 : 2;
+    const casing = dark ? '#0b1118' : '#ffffff';
+    railLines.casing.setStyle({ color: casing, weight: w + 3, opacity: .95 });
+    railLines.line.setStyle({ color: dark ? '#ffd23f' : '#1f2a37', weight: w, opacity: 1 });
+    railLines.hs.setStyle({ color: dark ? '#ff5c7a' : '#e4002b', weight: w + 1, opacity: 1 });
+    railLines.ties.setStyle({ color: casing, weight: Math.max(w - 1.4, .8), opacity: 1, dashArray: z >= 8 ? '7 7' : null });
+  }
+  function drawRails(parts) {
+    railVec.clearLayers();
+    const o = { renderer: railRenderer, interactive: false, lineCap: 'butt', lineJoin: 'round', smoothFactor: 1.2 };
+    railLines = {
+      casing: L.polyline([...parts.hs, ...parts.std], o),
+      line: L.polyline(parts.std, o),
+      hs: L.polyline(parts.hs, o),
+      ties: L.polyline(parts.std, o),
+    };
+    Object.values(railLines).forEach(l => l.addTo(railVec));
+    railStyle();
+  }
+  map.on('zoomend', railStyle);
+
+  // Modo A (por defecto): red completa servida (y cacheada) por server.py
+  async function loadRailsServer() {
+    const hint = railHint; clearTimeout(railRetry);
+    if (railData) { drawRails(railData); ormFallback(false); hint.textContent = railData.hs.length + railData.std.length + ' tramos · rojo = alta velocidad'; return; }
+    hint.textContent = 'Cargando vías…'; ormFallback(true);
+    try {
+      const r = await fetch('api/rails', { cache: 'no-store' });
+      if (r.status === 503) {
+        const j = await r.json().catch(() => ({}));
+        hint.textContent = 'El servidor está descargando las vías (solo la primera vez, 2–5 min)' + (j.tiles ? ' · zonas ' + j.tiles : '') + (j.error ? ' · ' + j.error : '') + '…';
+        if (railSrc === 'server') railRetry = setTimeout(loadRailsServer, 10000);
+        return;
+      }
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      railData = await r.json();
+      if (railSrc !== 'server') return;
+      drawRails(railData); ormFallback(false);
+      hint.textContent = railData.hs.length + railData.std.length + ' tramos · rojo = alta velocidad' + (railData.complete === false ? ' · red incompleta' : '');
+    } catch (e) {
+      // sin servidor local: pasar al modo por zona
+      railSrc = 'overpass'; $('railsrc').value = 'overpass';
+      hint.textContent = 'No hay servidor de vías (' + e.message + '): ¿ejecutas server.py nuevo? Pasando a «por zona» (acerca el zoom).';
+      loadRailsView();
+    }
+  }
+
+  // Modo B: consulta directa a Overpass solo de la zona visible (a partir de zoom 8)
+  async function loadRailsView() {
+    const hint = railHint;
+    if (railSrc !== 'overpass') return;
+    const z = map.getZoom();
+    if (z < RAIL_MIN_ZOOM) { railVec.clearLayers(); railLines = null; ormFallback(true); hint.textContent = 'Acerca el zoom (≥ ' + RAIL_MIN_ZOOM + ') para ver las vías de la zona.'; return; }
+    const b = map.getBounds().pad(.1);
+    const bbox = [b.getSouth(), b.getWest(), b.getNorth(), b.getEast()].map(x => x.toFixed(3)).join(',');
+    const filter = z >= 11 ? '["railway"~"^(rail|light_rail|narrow_gauge)$"]["service"!~"."]' : '["railway"~"^(rail|narrow_gauge)$"]["usage"~"^(main|branch)$"]';
+    const q = '[out:json][timeout:30];way' + filter + '(' + bbox + ');out geom qt;';
+    const id = ++railReq; hint.textContent = 'Cargando vías…';
+    try {
+      let r = null, lastErr = '';
+      for (const u of OVERPASS) {                       // prueba varios servidores públicos de Overpass
+        try {
+          r = await fetch(u, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: 'data=' + encodeURIComponent(q) });
+          if (r.ok) break;
+          lastErr = 'HTTP ' + r.status; r = null;
+        } catch (e) { lastErr = e.message; r = null; }
+      }
+      if (!r) throw new Error(lastErr || 'sin respuesta');
+      const j = await r.json();
+      if (id !== railReq || railSrc !== 'overpass') return;
+      const parts = { hs: [], std: [] };
+      for (const el of j.elements || []) {
+        if (!el.geometry) continue;
+        ((el.tags || {}).highspeed === 'yes' ? parts.hs : parts.std).push(el.geometry.map(p => [p.lat, p.lon]));
+      }
+      drawRails(parts); ormFallback(false);
+      hint.textContent = parts.hs.length + parts.std.length + ' tramos de vía · rojo = alta velocidad';
+    } catch (e) {
+      if (id === railReq) { ormFallback(true); hint.textContent = 'No se pudieron cargar las vías vectoriales (' + e.message + ')'; }
+    }
+  }
+  function loadRails() {
+    railReq++; clearTimeout(railRetry);
+    if (railSrc === 'server') loadRailsServer();
+    else if (railSrc === 'overpass') loadRailsView();
+    else railHint.textContent = '';
+  }
+  map.on('moveend', () => { if (railSrc === 'overpass') { clearTimeout(railTimer); railTimer = setTimeout(loadRailsView, 500); } scheduleLabels(); });
+
+  const canvas = L.canvas({ padding: .5 });
+  // Marcador que se dibuja como flecha orientada según el rumbo (si se conoce) o como círculo.
+  const TrainMarker = L.CircleMarker.extend({
+    _updatePath() {
+      const r = this._renderer, b = this.options.bearing;
+      if (b == null) return r._updateCircle(this);
+      if (!r._drawing || this._empty()) return;
+      const p = this._point, ctx = r._ctx, s = this._radius * 1.2;
+      ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(b * Math.PI / 180);
+      ctx.beginPath();
+      ctx.moveTo(0, -s * 1.45); ctx.lineTo(s * .95, s); ctx.lineTo(0, s * .38); ctx.lineTo(-s * .95, s); ctx.closePath();
+      ctx.restore();                         // el trazado ya está calculado; se restaura para no deformar el borde
+      r._fillStroke(ctx, this);
+    },
+  });
+  const COMPASS = ['N', 'NE', 'E', 'SE', 'S', 'SO', 'O', 'NO'];
+  // Rumbo de cada tren: el del feed si lo trae; si no, el calculado con el movimiento respecto a un punto de
+  // referencia que solo se actualiza cuando el tren se ha movido (>~10 m). Así el sentido se conserva aunque
+  // varias actualizaciones seguidas traigan la misma posición, y se guarda en el navegador entre recargas.
+  const MOVE_MIN = 0.00009, STORE = 'renfe-rumbos-v1';
+  const prevPos = new Map();               // clave -> {lat, lon, bearing, seen}
+  try {
+    for (const [k, p] of JSON.parse(localStorage.getItem(STORE) || '[]')) if (Date.now() - p.seen < 600000) prevPos.set(k, p);
+  } catch (e) { /* sin almacenamiento: no pasa nada */ }
+  function assignBearings(arr) {
+    const now = Date.now();
+    for (const t of arr) {
+      const k = t.tripId ? t.kind + ':' + t.tripId : t.key;
+      let p = prevPos.get(k);
+      const fb = t.bearing != null && isFinite(+t.bearing) && +t.bearing !== 0 ? +t.bearing : null;
+      if (!p) p = { lat: t.lat, lon: t.lon, bearing: null };
+      const dLat = t.lat - p.lat, dLon = (t.lon - p.lon) * Math.cos(t.lat * Math.PI / 180), d = Math.hypot(dLat, dLon);
+      if (d > 0.5) { p.bearing = null; p.lat = t.lat; p.lon = t.lon; }          // salto enorme: otro tren/viaje
+      else if (d > MOVE_MIN) { p.bearing = fb != null ? fb : (Math.atan2(dLon, dLat) * 180 / Math.PI + 360) % 360; p.lat = t.lat; p.lon = t.lon; }
+      else if (fb != null) p.bearing = fb;
+      p.seen = now; prevPos.set(k, p);
+      t.bearing = p.bearing;
+    }
+    for (const [k, p] of prevPos) if (now - p.seen > 600000) prevPos.delete(k);
+    try { localStorage.setItem(STORE, JSON.stringify([...prevPos])); } catch (e) { /* ignorar */ }
+  }
+  const layer = L.layerGroup().addTo(map);
+
+  /* ===================== tipos de tren ===================== */
+  const TYPES = {
+    'Cercanías': '#2e9bff', 'AVE': '#ff4d6d', 'AVE Int.': '#d6336c', 'AVLO': '#ff8a3d',
+    'Avant': '#f5c400', 'Avant Exp.': '#a68a00', 'Alvia': '#b36bff', 'Euromed': '#19c3c3',
+    'Intercity': '#2fbf71', 'Trencelta': '#5f7cff', 'Media Distancia': '#8ac926',
+    'Regional': '#c9a27a', 'Regional Exp.': '#9c6b3f', 'Proximidad': '#7ad0ff', 'Otros': '#8aa0b6',
+  };
+  // nombres tal como aparecen en routes.txt del GTFS de Renfe
+  const PRODUCT = { 'AVE': 'AVE', 'AVE INT': 'AVE Int.', 'AVLO': 'AVLO', 'AVANT': 'Avant', 'AVANT EXP': 'Avant Exp.',
+    'ALVIA': 'Alvia', 'EUROMED': 'Euromed', 'INTERCITY': 'Intercity', 'TRENCELTA': 'Trencelta', 'MD': 'Media Distancia',
+    'REGIONAL': 'Regional', 'REG.EXP.': 'Regional Exp.', 'REG.EXP': 'Regional Exp.', 'PROXIMDAD': 'Proximidad', 'PROXIMIDAD': 'Proximidad' };
+  const TEXT_RULES = [
+    ['AVLO', /\bAVLO\b/], ['Avant Exp.', /\bAVANT\s*EXP/], ['Avant', /\bAVANT\b/], ['Alvia', /\bALVIA\b/], ['Euromed', /\bEUROMED\b/],
+    ['Intercity', /\b(INTERCITY|IC)\b/], ['Trencelta', /\bTRENCELTA\b/], ['AVE Int.', /\bAVE\s*INT/], ['AVE', /\bAVE\b|\bAV\b/],
+    ['Regional Exp.', /\bREG\.?\s*EXP/], ['Regional', /\bREGIONAL\b/], ['Proximidad', /\bPROXIM/], ['Media Distancia', /\b(MD|MEDIA DISTANCIA)\b/],
+  ];
+  function canonicalProduct(raw) {
+    const k = String(raw).trim().toUpperCase();
+    if (PRODUCT[k]) return PRODUCT[k];
+    for (const [n, re] of TEXT_RULES) if (re.test(k)) return n;
+    return 'Otros';
+  }
+  const hiddenTypes = new Set();
+
+  /* ===================== retrasos ===================== */
+  const DCOL = { ok: '#2fbf71', warn: '#f0a020', bad: '#e4002b', early: '#19c3c3', na: '#8aa0b6' };
+  const dmin = t => t.delaySec == null ? null : Math.round(t.delaySec / 60);
+  function dclass(t) {
+    if (t.canceled) return 'bad';
+    const m = dmin(t);
+    if (m == null) return 'na';
+    return m < 0 ? 'early' : m <= 2 ? 'ok' : m <= 10 ? 'warn' : 'bad';
+  }
+  function dtxt(t) {
+    if (t.canceled) return 'suprimido';
+    const m = dmin(t);
+    if (m == null) return 's/d';
+    return m === 0 ? '±0′' : (m > 0 ? '+' : '−') + Math.abs(m) + '′';
+  }
+  function dlong(t) {
+    if (t.canceled) return 'Viaje marcado como suprimido por Renfe (pero el tren envía posición)';
+    const m = dmin(t);
+    if (m == null) return 'Sin dato de retraso';
+    return m === 0 ? 'Puntual' : Math.abs(m) + ' min de ' + (m > 0 ? 'retraso' : 'adelanto');
+  }
+  const code = t => t.kind === 'cercanias' ? t.label.split('-PLATF')[0] : (t.number || t.label || t.tripId);
+  const colorOf = t => $('colorby').value === 'delay' ? DCOL[dclass(t)] : (TYPES[t.type] || '#8aa0b6');
+
+  /* ===================== datos ===================== */
+  let trains = [], markers = new Map(), selected = null;
+  let timer = null, demoMode = false, infos = {};
+
+  const STATUS = { INCOMING_AT: 'Llegando a parada', STOPPED_AT: 'Detenido en parada', IN_TRANSIT_TO: 'En marcha hacia parada',
+                   0: 'Llegando a parada', 1: 'Detenido en parada', 2: 'En marcha hacia parada' };
+
+  function normalize(json, kind) {
+    const out = [];
+    for (const e of (json && (json.entity || json.entities)) || []) {
+      const v = e.vehicle || e, pos = v.position || {};
+      const lat = +pick(pos, 'latitude', 'lat'), lon = +pick(pos, 'longitude', 'lon', 'lng');
+      if (!isFinite(lat) || !isFinite(lon) || (lat === 0 && lon === 0)) continue;
+      const trip = v.trip || {}, veh = v.vehicle || {};
+      const label = String(pick(veh, 'label', 'id') ?? e.id ?? '');
+      const tripId = String(pick(trip, 'tripId', 'trip_id') ?? '');
+      let type, line;
+      if (kind === 'cercanias') {
+        type = 'Cercanías';
+        line = String(pick(trip, 'routeId', 'route_id') ?? '');
+        const m = label.match(/^([A-Z]{1,3}\d{1,2}[a-z]?)\b/i);
+        if (m) line = m[1].toUpperCase();
+        if (!line) line = 'Cercanías';
+      } else {
+        type = e._product ? canonicalProduct(e._product)
+             : canonicalProduct(label + ' ' + String(pick(trip, 'routeShortName', 'route_short_name', 'routeId', 'route_id') ?? ''));
+        line = type;
+      }
+      let delaySec = e._delay != null ? +e._delay : (pick(v, 'delay') != null ? +v.delay : null);
+      out.push({
+        key: kind + ':' + (e.id ?? label ?? tripId), kind, lat, lon, label, tripId, line, type,
+        number: e._number ? String(e._number) : '', headsign: e._headsign || '',
+        stopId: String(pick(v, 'stopId', 'stop_id') ?? ''), stopName: e._stopName || '',
+        status: pick(v, 'currentStatus', 'current_status'), bearing: pick(pos, 'bearing'),
+        speed: pick(pos, 'speed'), ts: +(pick(v, 'timestamp') ?? 0) || null,
+        delaySec: isFinite(delaySec) ? delaySec : null, canceled: !!e._canceled, cancelInfo: e._cancelInfo || '',
+      });
+    }
+    return out;
+  }
+
+  async function getJSON(kind) {
+    const tryUrl = async url => {
+      const r = await fetch(url, { cache: 'no-store' });
+      if (!r.ok) throw new Error(url + ' → HTTP ' + r.status);
+      return r.json();
+    };
+    try { return await tryUrl(API[kind]); }
+    catch (e1) {
+      try { return await tryUrl(DIRECT[kind]); }
+      catch (e2) { throw new Error(e1.message + ' | ' + e2.message); }
+    }
+  }
+
+  async function refresh() {
+    if (demoMode) { demoTick(); return; }
+    setStatus('', 'Actualizando…');
+    const res = await Promise.allSettled([getJSON('cercanias'), getJSON('larga')]);
+    const all = [], errs = [];
+    ['cercanias', 'larga'].forEach((k, i) => {
+      if (res[i].status === 'fulfilled') { all.push(...normalize(res[i].value, k)); infos[k] = res[i].value._info || null; }
+      else errs.push(k + ': ' + res[i].reason.message);
+    });
+    if (!all.length) {
+      setStatus('err', 'Sin datos de Renfe. Ejecuta server.py o prueba el modo Demo.');
+      console.warn(errs.join('\n')); return;
+    }
+    assignBearings(all); trains = all;
+    const L_ = infos.larga, C_ = infos.cercanias;
+    let txt = 'Actualizado ' + new Date().toLocaleTimeString('es-ES');
+    if (L_) txt += ' · Larga: tipo ' + L_.typed + '/' + L_.vehicles + ', retraso ' + L_.delayed + '/' + L_.vehicles + (L_.static ? '' : ' (GTFS cargando…)');
+    if (C_) txt += ' · Cercanías: retraso ' + C_.delayed + '/' + C_.vehicles;
+    txt += ' · con sentido ' + all.filter(t => t.bearing != null).length + '/' + all.length;
+    if (errs.length) txt += ' · falló algún feed';
+    setStatus('ok', txt);
+    render(true);
+  }
+
+  /* ===================== render ===================== */
+  function visible() {
+    const q = $('q').value.trim().toLowerCase(), ln = $('line').value, df = $('dfilter').value;
+    return trains.filter(t => {
+      if (hiddenTypes.has(t.type)) return false;
+      if (ln && t.line !== ln) return false;
+      const m = dmin(t);
+      if (df === '5' || df === '15' || df === '30') { if (m == null || m < +df) return false; }
+      else if (df === 'early') { if (m == null || m >= 0) return false; }
+      else if (df === 'nodata') { if (m != null || t.canceled) return false; }
+      return !q || (t.label + ' ' + t.number + ' ' + t.tripId + ' ' + t.line + ' ' + t.type + ' ' + t.headsign + ' ' + t.stopName + ' ' + t.stopId).toLowerCase().includes(q);
+    });
+  }
+
+  function popup(t) {
+    const rows = [
+      ['Tipo', t.type], ['Línea', t.kind === 'cercanias' ? t.line : null],
+      ['Tren', code(t)], ['Destino', t.headsign || null], ['Viaje', t.tripId || null],
+      ['Aviso Renfe', t.canceled ? t.cancelInfo : null],
+      ['Estado', STATUS[t.status] || null],
+      ['Parada', t.stopName ? t.stopName + (t.stopId ? ' (' + t.stopId + ')' : '') : (t.stopId || null)],
+      ['Rumbo', t.bearing != null ? COMPASS[Math.round(t.bearing / 45) % 8] + ' (' + Math.round(t.bearing) + '°)' : null],
+      ['Velocidad', t.speed != null ? Math.round(t.speed * 3.6) + ' km/h' : null],
+      ['Posición', t.lat.toFixed(5) + ', ' + t.lon.toFixed(5)],
+      ['Dato de', t.ts ? new Date(t.ts * 1000).toLocaleTimeString('es-ES') : null],
+    ].filter(r => r[1] != null && r[1] !== '');
+    return '<div class="pop"><h3>' + esc(t.type) + ' · ' + esc(code(t)) + '</h3>' +
+      '<div class="big" style="color:' + DCOL[dclass(t)] + '">' + esc(dlong(t)) + '</div><table>' +
+      rows.map(r => '<tr><td>' + r[0] + '</td><td>' + esc(String(r[1])) + '</td></tr>').join('') + '</table></div>';
+  }
+
+  function render(rebuildLines) {
+    const vis = visible(), keep = new Set();
+    for (const t of vis) {
+      keep.add(t.key);
+      let m = markers.get(t.key);
+      if (!m) {
+        m = new TrainMarker([t.lat, t.lon], { renderer: canvas, radius: 5.5, fillOpacity: .95, bearing: t.bearing });
+        m.on('click', () => select(t.key, false));
+        m.addTo(layer); markers.set(t.key, m);
+      } else m.setLatLng([t.lat, t.lon]);
+      m._t = t; m.options.bearing = t.bearing;
+      const sel = selected === t.key, known = dmin(t) != null || t.canceled;
+      // relleno: tipo o retraso; aro: retraso (si se colorea por tipo y hay dato)
+      m.setStyle({ fillColor: colorOf(t), radius: sel ? 9 : (t.bearing != null ? 6 : 5.5),
+                   weight: sel ? 3 : known ? 2.5 : 1.2,
+                   color: sel ? '#fff' : known ? DCOL[dclass(t)] : '#0b1118' });
+      m.unbindPopup().bindPopup(popup(t), { autoPan: false });
+    }
+    for (const [k, m] of markers) if (!keep.has(k)) { m.unbindTooltip(); layer.removeLayer(m); markers.delete(k); }
+
+    const known = trains.map(dmin).filter(x => x != null);
+    $('nAll').textContent = trains.length;
+    $('nCer').textContent = trains.filter(t => t.kind === 'cercanias').length;
+    $('nLar').textContent = trains.filter(t => t.kind !== 'cercanias').length;
+    $('nDel').textContent = known.length ? known.filter(m => m >= 5).length : '–';
+    $('nAvg').textContent = known.length ? (known.reduce((a, b) => a + b, 0) / known.length).toFixed(1).replace('.', ',') + '′' : '–';
+    $('nKnown').textContent = known.length + '/' + trains.length;
+    buildChips();
+    if (rebuildLines) buildLines();
+    buildList(vis);
+    applyLabels();
+  }
+
+  /* ---- etiquetas (código + retraso) junto a cada tren ---- */
+  let labelTimer = null;
+  const scheduleLabels = () => { clearTimeout(labelTimer); labelTimer = setTimeout(applyLabels, 150); };
+  function applyLabels() {
+    const mode = $('labels').value, b = map.getBounds().pad(.05), z = map.getZoom();
+    const inView = [];
+    for (const m of markers.values()) if (b.contains(m.getLatLng())) inView.push(m);
+    const on = mode === 'all' || (mode === 'auto' && (z >= 9 || inView.length <= 120));
+    const MAX = mode === 'all' ? 800 : 400;
+    const want = new Set(on ? inView.slice(0, MAX) : []);
+    for (const m of markers.values()) {
+      if (!want.has(m)) { if (m._lab) { m.unbindTooltip(); m._lab = false; } continue; }
+      const t = m._t;
+      const html = '<b>' + esc(code(t)) + '</b><span class="d">' + esc(dtxt(t)) + '</span>';
+      if (m._lab) m.unbindTooltip();
+      m.bindTooltip(html, { permanent: true, direction: 'right', offset: [9, 0], className: 'tlabel tl-' + dclass(t), opacity: .96 });
+      m._lab = true;
+    }
+  }
+
+  function buildChips() {
+    const counts = {};
+    for (const t of trains) counts[t.type] = (counts[t.type] || 0) + 1;
+    $('types').innerHTML = Object.keys(TYPES).map(n =>
+      '<span class="chip' + (hiddenTypes.has(n) ? ' off' : '') + (counts[n] ? '' : ' zero') + '" data-t="' + esc(n) + '">' +
+      '<i style="background:' + TYPES[n] + '"></i>' + esc(n) + ' <em>' + (counts[n] || 0) + '</em></span>').join('');
+  }
+
+  function buildLines() {
+    const sel = $('line'), cur = sel.value;
+    const set = [...new Set(trains.map(t => t.line))].sort((a, b) => a.localeCompare(b, 'es', { numeric: true }));
+    sel.innerHTML = '<option value="">Todas las líneas</option>' + set.map(l => '<option>' + esc(l) + '</option>').join('');
+    sel.value = set.includes(cur) ? cur : '';
+  }
+
+  function buildList(vis) {
+    const MAX = 300, el = $('list'), so = $('sort').value;
+    const cmpLine = (a, b) => a.type.localeCompare(b.type, 'es') || a.line.localeCompare(b.line, 'es', { numeric: true }) || code(a).localeCompare(code(b), 'es', { numeric: true });
+    const dv = t => t.canceled ? 1e9 : dmin(t);
+    let arr = vis.slice();
+    if (so === 'late') arr.sort((a, b) => (dv(b) ?? -1e9) - (dv(a) ?? -1e9));
+    else if (so === 'early') arr.sort((a, b) => (dv(a) ?? 1e9) - (dv(b) ?? 1e9));
+    else arr.sort(cmpLine);
+    el.innerHTML = arr.slice(0, MAX).map(t =>
+      '<div class="item' + (selected === t.key ? ' sel' : '') + '" data-k="' + esc(t.key) + '">' +
+      '<span class="badge" style="background:' + (TYPES[t.type] || '#8aa0b6') + '">' + esc((t.kind === 'cercanias' ? t.line : t.type).slice(0, 8)) + '</span>' +
+      '<div class="t"><div>' + esc(code(t)) + (t.headsign ? ' → ' + esc(t.headsign) : '') + '</div><div>' + esc(t.stopName || STATUS[t.status] || 'Sin estado') + '</div></div>' +
+      '<span class="dl dl-' + dclass(t) + '">' + esc(dtxt(t)) + '</span></div>').join('') +
+      (vis.length > MAX ? '<div class="note">Mostrando ' + MAX + ' de ' + vis.length + '. Usa el buscador o los filtros.</div>' : '') +
+      (!vis.length ? '<div class="note">Ningún tren coincide con los filtros.</div>' : '');
+  }
+
+  function select(key, fly) {
+    selected = key; const m = markers.get(key);
+    if (m) { if (fly) map.flyTo(m.getLatLng(), Math.max(map.getZoom(), 11), { duration: .6 }); m.openPopup(); }
+    render(false);
+  }
+
+  /* ===================== UI ===================== */
+  function setStatus(cls, txt) { $('status').className = cls; $('statusTxt').textContent = txt; }
+  $('list').addEventListener('click', e => { const it = e.target.closest('.item'); if (it) { select(it.dataset.k, true); if (innerWidth <= 760) $('side').classList.remove('open'); } });
+  ['line', 'dfilter', 'sort', 'colorby'].forEach(id => $(id).addEventListener('change', () => render(false)));
+  $('labels').addEventListener('change', applyLabels);
+  $('types').addEventListener('click', e => {
+    const c = e.target.closest('.chip'); if (!c) return;
+    const n = c.dataset.t; hiddenTypes.has(n) ? hiddenTypes.delete(n) : hiddenTypes.add(n); render(false);
+  });
+  $('tAll').addEventListener('click', e => { e.preventDefault(); hiddenTypes.clear(); render(false); });
+  $('tNone').addEventListener('click', e => { e.preventDefault(); Object.keys(TYPES).forEach(n => hiddenTypes.add(n)); render(false); });
+  $('railsrc').addEventListener('change', e => {
+    railSrc = e.target.value;
+    map.removeLayer(rails); railVec.clearLayers(); railLines = null;
+    if (railSrc === 'orm') rails.addTo(map);
+    loadRails();
+  });
+  $('basemap').addEventListener('change', e => {
+    map.removeLayer(base); baseName = e.target.value; base = BASES[baseName].addTo(map); base.bringToBack();
+    railStyle();
+  });
+  let qt; $('q').addEventListener('input', () => { clearTimeout(qt); qt = setTimeout(() => render(false), 150); });
+  $('reload').addEventListener('click', () => refresh());
+  $('toggle').addEventListener('click', () => $('side').classList.toggle('open'));
+  function schedule() { clearInterval(timer); if ($('auto').checked && !demoMode) timer = setInterval(refresh, +$('every').value * 1000); }
+  $('auto').addEventListener('change', schedule);
+  $('every').addEventListener('change', schedule);
+  map.on('click', () => { if (selected) { selected = null; render(false); } });
+
+  /* ===================== modo demo ===================== */
+  const MAD = [40.407, -3.689], BCN = [41.38, 2.14], VLC = [39.47, -0.38], SEV = [37.39, -5.98];
+  const CORR = [   // [ruta, trazado, kind, producto GTFS / línea]
+    ['AVE Madrid–Barcelona', [MAD, [41.12,-1.25], [41.65,-0.88], BCN], 'lar', 'AVE'],
+    ['AVLO Madrid–Barcelona', [MAD, [41.12,-1.25], [41.65,-0.88], BCN], 'lar', 'AVLO'],
+    ['AVE Madrid–Sevilla', [MAD, [38.99,-3.92], [37.88,-4.78], SEV], 'lar', 'AVE'],
+    ['AVE Madrid–Valencia', [MAD, [39.99,-2.15], VLC], 'lar', 'AVE'],
+    ['Alvia Madrid–Galicia', [MAD, [41.65,-4.72], [42.34,-7.86], [42.88,-8.54]], 'lar', 'ALVIA'],
+    ['Euromed Barcelona–Valencia', [BCN, [40.7,0.58], VLC], 'lar', 'EUROMED'],
+    ['Intercity Madrid–Cuenca', [MAD, [40.07,-2.13]], 'lar', 'Intercity'],
+    ['Avant Sevilla–Córdoba', [SEV, [37.88,-4.78]], 'lar', 'AVANT'],
+    ['Avant Exp. Madrid–Toledo', [MAD, [39.86,-4.02]], 'lar', 'AVANT EXP'],
+    ['AVE Int. Barcelona–Girona', [BCN, [41.98,2.82]], 'lar', 'AVE INT'],
+    ['Trencelta Vigo–Oporto', [[42.24,-8.72], [41.15,-8.61]], 'lar', 'TRENCELTA'],
+    ['MD Zaragoza–Huesca', [[41.65,-0.88], [42.14,-0.41]], 'lar', 'MD'],
+    ['Regional Valencia–Castellón', [VLC, [39.99,-0.05]], 'lar', 'REGIONAL'],
+    ['Reg. Exp. Madrid–Segovia', [MAD, [40.95,-4.12]], 'lar', 'REG.EXP.'],
+    ['Proximidad León–Astorga', [[42.60,-5.57], [42.46,-6.06]], 'lar', 'PROXIMDAD'],
+    ['C-1 Madrid', [[40.04,-3.60], MAD, [40.50,-3.67]], 'cer', 'C1'],
+    ['C-3 Madrid', [[40.04,-3.60], MAD, [40.20,-3.60]], 'cer', 'C3'],
+    ['C-5 Madrid', [[40.35,-3.82], MAD, [40.30,-3.75]], 'cer', 'C5'],
+    ['C-4 Madrid', [MAD, [40.55,-3.71], [40.68,-3.64]], 'cer', 'C4'],
+    ['R2 Rodalies', [BCN, [41.46,2.25], [41.55,2.55]], 'cer', 'R2'],
+    ['C-1 Valencia', [VLC, [39.30,-0.40], [39.10,-0.40]], 'cer', 'C1'],
+    ['C-1 Sevilla', [SEV, [37.34,-5.93], [37.28,-5.90]], 'cer', 'C1'],
+  ];
+  let demoState = [];
+  const interp = (path, f) => {
+    const n = path.length - 1, x = Math.min(Math.max(f, 0), .9999) * n, i = Math.floor(x), u = x - i;
+    return [path[i][0] + (path[i + 1][0] - path[i][0]) * u, path[i][1] + (path[i + 1][1] - path[i][1]) * u];
+  };
+  const rdelay = () => { const r = Math.random();
+    return r < .08 ? null : r < .2 ? -Math.round(60 + Math.random() * 180) : r < .6 ? Math.round(Math.random() * 150)
+         : r < .85 ? Math.round(180 + Math.random() * 480) : Math.round(660 + Math.random() * 2400); };
+  function demoInit() {
+    demoState = [];
+    CORR.forEach((c, ci) => { const n = c[2] === 'lar' ? 3 : 4;
+      for (let i = 0; i < n; i++) demoState.push({ ci, f: Math.random(), dir: Math.random() < .5 ? 1 : -1,
+        v: (c[2] === 'lar' ? .006 : .01) * (.6 + Math.random() * .8), id: ci * 10 + i, delay: rdelay() }); });
+  }
+  function demoTick() {
+    if (!demoState.length) demoInit();
+    const out = [];
+    for (const s of demoState) {
+      s.f += s.dir * s.v; if (s.f > 1 || s.f < 0) { s.dir *= -1; s.f = Math.min(Math.max(s.f, 0), 1); }
+      const c = CORR[s.ci], [lat, lon] = interp(c[1], s.f), kind = c[2] === 'cer' ? 'cercanias' : 'larga';
+      const num = String(1000 + s.id * 37);
+      out.push({ key: 'demo:' + s.id, kind, lat, lon, tripId: 'DEMO' + s.id,
+        label: kind === 'cercanias' ? c[3] + '-' + (20000 + s.id) + '-PLATF.(1)' : num, number: kind === 'larga' ? num : '',
+        type: kind === 'cercanias' ? 'Cercanías' : canonicalProduct(c[3]), line: kind === 'cercanias' ? c[3] : canonicalProduct(c[3]),
+        headsign: c[0].split(/[–-]/).pop().trim(), stopId: '', stopName: '', status: 'IN_TRANSIT_TO',
+        speed: kind === 'larga' ? 70 + Math.random() * 30 : 25, ts: Math.floor(Date.now() / 1000), delaySec: s.delay, canceled: false });
+    }
+    assignBearings(out); trains = out; setStatus('demo', 'MODO DEMO · datos simulados · ' + new Date().toLocaleTimeString('es-ES')); render(true);
+  }
+  $('demo').addEventListener('click', () => {
+    demoMode = !demoMode; $('demo').style.borderColor = demoMode ? 'var(--warn)' : '';
+    for (const m of markers.values()) { m.unbindTooltip(); layer.removeLayer(m); } markers.clear(); prevPos.clear(); try { localStorage.removeItem(STORE); } catch (e) {} trains = []; selected = null;
+    if (demoMode) { clearInterval(timer); timer = setInterval(demoTick, 2000); demoTick(); }
+    else { schedule(); refresh(); }
+  });
+
+  window.__renfe = { trains: () => trains, refresh };   // utilidad de depuración
+
+  /* ===================== arranque ===================== */
+  buildChips();
+  rails.addTo(map);                       // vías por defecto: OpenRailwayMap
+  schedule(); refresh(); loadRails();
+})();
+</script>
+</body>
+</html>
