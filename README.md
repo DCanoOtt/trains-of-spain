@@ -5,8 +5,8 @@ Mapa en tiempo real de los trenes de Renfe (Cercanías/Rodalies y Alta Velocidad
 ## Instalar y ejecutar
 
 ```bash
-git clone https://github.com/TU_USUARIO/renfe-trenes.git
-cd renfe-trenes
+git clone https://github.com/DCanoOtt/trains-of-spain.git
+cd trains-of-spain
 python3 server.py        # puerto 8765 por defecto; opcional: python3 server.py 9000
 ```
 
