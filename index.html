@@ -245,7 +245,7 @@
     railLines.casing.setStyle({ color: casing, weight: w + 3, opacity: .95 });
     railLines.line.setStyle({ color: dark ? '#ffd23f' : '#1f2a37', weight: w, opacity: 1 });
     railLines.hs.setStyle({ color: dark ? '#ff5c7a' : '#e4002b', weight: w + 1, opacity: 1 });
-    railLines.ties.setStyle({ color: casing, weight: Math.max(w - 1.4, .8), opacity: 1, dashArray: z >= 8 ? '7 7' : null });
+    railLines.ties.setStyle({ color: casing, weight: Math.max(w - 1.4, .8), opacity: z >= 10 ? 1 : 0, dashArray: '7 7' });
   }
   function drawRails(parts) {
     railVec.clearLayers();
@@ -261,28 +261,39 @@
   }
   map.on('zoomend', railStyle);
 
-  // Modo A (por defecto): red completa servida (y cacheada) por server.py
+  // Modo A: vías vectoriales servidas por server.py, solo de la zona visible y con el nivel de detalle
+  // que corresponde al zoom (zoom bajo = pocas líneas muy simplificadas). Mucho más rápido que cargar toda la red.
+  let railBox = null, railLvl = -1;
+  const levelFor = z => z <= 6 ? 0 : z <= 8 ? 1 : z <= 10 ? 2 : 3;
   async function loadRailsServer() {
     const hint = railHint; clearTimeout(railRetry);
-    if (railData) { drawRails(railData); ormFallback(false); hint.textContent = railData.hs.length + railData.std.length + ' tramos · rojo = alta velocidad'; return; }
-    hint.textContent = 'Cargando vías…'; ormFallback(true);
+    const z = map.getZoom(), lvl = levelFor(z), vb = map.getBounds();
+    if (railLines && railBox && railLvl === lvl && railBox.contains(vb)) return;   // ya tenemos esta zona
+    const want = lvl === 0 ? IBERIA : vb.pad(.5);
+    const bbox = [want.getSouth(), want.getWest(), want.getNorth(), want.getEast()].map(x => x.toFixed(3)).join(',');
+    const id = ++railReq;
+    if (!railLines) { hint.textContent = 'Cargando vías…'; ormFallback(true); }
     try {
-      const r = await fetch('api/rails', { cache: 'no-store' });
+      const r = await fetch('api/rails?z=' + z + '&bbox=' + bbox, { cache: 'no-store' });
+      if (id !== railReq || railSrc !== 'server') return;
       if (r.status === 503) {
         const j = await r.json().catch(() => ({}));
-        hint.textContent = 'El servidor está descargando las vías (solo la primera vez, 2–5 min)' + (j.tiles ? ' · zonas ' + j.tiles : '') + (j.error ? ' · ' + j.error : '') + '…';
-        if (railSrc === 'server') railRetry = setTimeout(loadRailsServer, 10000);
+        hint.textContent = j.state === 'error'
+          ? 'El servidor no pudo descargar las vías' + (j.error ? ' (' + j.error + ')' : '') + '. Reinícialo o revisa su consola.'
+          : 'El servidor está descargando las vías (solo la primera vez, unos minutos)' + (j.tiles ? ' · zonas ' + j.tiles : '') + (j.error ? ' · ' + j.error : '') + '…';
+        ormFallback(true);
+        if (j.state !== 'error') railRetry = setTimeout(loadRailsServer, 8000);
         return;
       }
       if (!r.ok) throw new Error('HTTP ' + r.status);
-      railData = await r.json();
-      if (railSrc !== 'server') return;
-      drawRails(railData); ormFallback(false);
-      hint.textContent = railData.hs.length + railData.std.length + ' tramos · rojo = alta velocidad' + (railData.complete === false ? ' · red incompleta' : '');
+      const j = await r.json();
+      if (id !== railReq || railSrc !== 'server') return;
+      drawRails(j); railBox = want; railLvl = lvl; ormFallback(false);
+      hint.textContent = (j.hs.length + j.std.length) + ' tramos · rojo = alta velocidad' + (j.complete === false ? ' · red incompleta' : '');
     } catch (e) {
-      // sin servidor local: pasar al modo por zona
+      // sin servidor (o servidor antiguo): pasar al modo por zona
       railSrc = 'overpass'; $('railsrc').value = 'overpass';
-      hint.textContent = 'No hay servidor de vías (' + e.message + '): ¿ejecutas server.py nuevo? Pasando a «por zona» (acerca el zoom).';
+      hint.textContent = 'No hay servidor de vías (' + e.message + '): ¿ejecutas el server.py nuevo? Pasando a «por zona» (acerca el zoom).';
       loadRailsView();
     }
   }
@@ -327,7 +338,11 @@
     else if (railSrc === 'overpass') loadRailsView();
     else railHint.textContent = '';
   }
-  map.on('moveend', () => { if (railSrc === 'overpass') { clearTimeout(railTimer); railTimer = setTimeout(loadRailsView, 500); } scheduleLabels(); });
+  map.on('moveend', () => {
+    if (railSrc === 'overpass') { clearTimeout(railTimer); railTimer = setTimeout(loadRailsView, 500); }
+    else if (railSrc === 'server') { clearTimeout(railTimer); railTimer = setTimeout(loadRailsServer, 250); }
+    scheduleLabels();
+  });
 
   const canvas = L.canvas({ padding: .5 });
   // Marcador que se dibuja como flecha orientada según el rumbo (si se conoce) o como círculo.
@@ -633,7 +648,7 @@
   $('tNone').addEventListener('click', e => { e.preventDefault(); Object.keys(TYPES).forEach(n => hiddenTypes.add(n)); render(false); });
   $('railsrc').addEventListener('change', e => {
     railSrc = e.target.value;
-    map.removeLayer(rails); railVec.clearLayers(); railLines = null;
+    map.removeLayer(rails); railVec.clearLayers(); railLines = null; railBox = null;
     if (railSrc === 'orm') rails.addTo(map);
     loadRails();
   });

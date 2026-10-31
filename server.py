@@ -25,6 +25,7 @@ import time
 import urllib.parse
 import urllib.request
 import zipfile
+from concurrent.futures import ThreadPoolExecutor
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -255,10 +256,19 @@ def enrich(kind, obj):
 
 
 # ---------------------------------------------------------------- trazado de vías (OSM / Overpass)
-RAILS = {"state": "idle", "error": None, "raw": None, "gz": None, "built": None, "tiles": "0/0"}
+# El trazado se descarga una vez y se guarda en data/rails.json (se puede subir a GitHub para que nadie
+# tenga que esperar). Se sirve por zona y con distinto nivel de detalle según el zoom, para que sea rápido.
+DATA_DIR = HERE / "data"
+RAILS = {"state": "idle", "error": None, "built": None, "tiles": "0/0", "complete": True, "levels": {}}
 LAT_CUTS = [35.9, 38.6, 41.3, 44.0]
 LON_CUTS = [-9.7, -7.06, -4.42, -1.78, 0.86, 3.5]
-EPS = 0.0002  # ~22 m
+BASE_EPS = 0.0002                                  # ~22 m
+LEVEL_EPS = {2: 0.0005, 1: 0.0015, 0: 0.006}       # simplificación de los niveles gruesos (zoom bajo)
+FLAG_HS, FLAG_MAIN = 1, 2
+
+
+def level_for_zoom(z):
+    return 0 if z <= 6 else 1 if z <= 8 else 2 if z <= 10 else 3
 
 
 def rdp(pts, eps):
@@ -311,57 +321,122 @@ def overpass(query):
     raise RuntimeError(last)
 
 
+def _load_rails_file():
+    """Devuelve datos {'complete','built','ways'} de data/rails.json (o de la caché antigua), o None."""
+    for cand in (DATA_DIR / "rails.json", CACHE_DIR / "rails.json"):
+        if not cand.exists():
+            continue
+        try:
+            d = json.loads(cand.read_text())
+        except Exception as e:  # noqa: BLE001
+            log("No se pudo leer %s: %s" % (cand, e))
+            continue
+        if "ways" not in d:  # formato antiguo {hs, std}
+            d["ways"] = [[FLAG_HS | FLAG_MAIN, p] for p in d.get("hs", [])] + [[FLAG_MAIN, p] for p in d.get("std", [])]
+        if d.get("complete") or time.time() - cand.stat().st_mtime < 6 * 3600:
+            return d
+    return None
+
+
 def build_rails():
-    path = CACHE_DIR / "rails.json"
     try:
-        if path.exists():
-            data = json.loads(path.read_text())
-            fresh = time.time() - path.stat().st_mtime
-            if (data.get("complete") and fresh < 45 * 86400) or fresh < 6 * 3600:
-                _set_rails(data)
-                log("Vías cargadas de la caché (%d tramos)" % (len(data["std"]) + len(data["hs"])))
-                if data.get("complete"):
-                    return
-        RAILS["state"] = "building"
-        seen, hs, std = set(), [], []
+        data = _load_rails_file()
+        if data:
+            _set_rails(data)
+            log("Vías cargadas del disco (%d tramos)" % len(data["ways"]))
+            if data.get("complete"):
+                return
+        RAILS["state"] = "building" if not data else "ready"
         tiles = [(LAT_CUTS[i], LON_CUTS[j], LAT_CUTS[i + 1], LON_CUTS[j + 1])
                  for i in range(len(LAT_CUTS) - 1) for j in range(len(LON_CUTS) - 1)]
-        failed = 0
-        for n, (s, w, nn, e) in enumerate(tiles, 1):
-            RAILS["tiles"] = "%d/%d" % (n - 1, len(tiles)); RAILS["error"] = None if not failed else RAILS["error"]
+        done = [0]
+        lock = threading.Lock()
+
+        def one(tile):
+            s, w, n, e = tile
             q = ('[out:json][timeout:180];'
                  'way["railway"~"^(rail|narrow_gauge)$"]["usage"~"^(main|branch)$"]["service"!~"."]'
-                 '(%s,%s,%s,%s);out geom qt;' % (s, w, nn, e))
-            log("Vías: descargando zona %d/%d…" % (n, len(tiles)))
+                 '(%s,%s,%s,%s);out geom qt;' % (s, w, n, e))
             try:
                 j = overpass(q)
             except Exception as ex:  # noqa: BLE001
-                failed += 1
                 RAILS["error"] = str(ex)
-                continue
+                return None
+            out = []
             for el in j.get("elements", []):
-                if el.get("id") in seen or not el.get("geometry"):
+                if not el.get("geometry"):
                     continue
-                seen.add(el["id"])
-                pts = rdp([(p["lat"], p["lon"]) for p in el["geometry"]], EPS)
-                pts = [[round(a, 5), round(b, 5)] for a, b in pts]
-                (hs if (el.get("tags") or {}).get("highspeed") == "yes" else std).append(pts)
-            time.sleep(5)
-        data = {"complete": failed == 0, "built": int(time.time()), "hs": hs, "std": std}
-        if hs or std:
-            path.write_text(json.dumps(data, separators=(",", ":")))
+                tags = el.get("tags") or {}
+                flags = (FLAG_HS if tags.get("highspeed") == "yes" else 0) | (FLAG_MAIN if tags.get("usage") == "main" else 0)
+                pts = rdp([(p["lat"], p["lon"]) for p in el["geometry"]], BASE_EPS)
+                out.append((el.get("id"), flags, [[round(a, 5), round(b, 5)] for a, b in pts]))
+            time.sleep(1)
+            with lock:
+                done[0] += 1
+                RAILS["tiles"] = "%d/%d" % (done[0], len(tiles))
+            log("Vías: zona %d/%d lista" % (done[0], len(tiles)))
+            return out
+
+        RAILS["tiles"] = "0/%d" % len(tiles)
+        seen, ways, failed = set(), [], 0
+        with ThreadPoolExecutor(max_workers=2) as ex:   # 2 consultas a la vez: respeta a Overpass y acelera
+            for res in ex.map(one, tiles):
+                if res is None:
+                    failed += 1
+                    continue
+                for wid, flags, pts in res:
+                    if wid in seen:
+                        continue
+                    seen.add(wid)
+                    ways.append([flags, pts])
+        data = {"complete": failed == 0, "built": int(time.time()), "ways": ways}
+        if ways:
+            DATA_DIR.mkdir(exist_ok=True)
+            (DATA_DIR / "rails.json").write_text(json.dumps(data, separators=(",", ":")))
             _set_rails(data)
-            log("Vías listas: %d tramos (%d zonas fallidas)" % (len(hs) + len(std), failed))
-        else:
+            log("Vías listas: %d tramos (%d zonas fallidas)" % (len(ways), failed))
+        elif RAILS["state"] != "ready":
             RAILS["state"] = "error"
     except Exception as e:  # noqa: BLE001
-        RAILS["state"], RAILS["error"] = "error", str(e)
+        RAILS["error"] = str(e)
+        if RAILS["state"] != "ready":
+            RAILS["state"] = "error"
         log("Vías: error %s" % e)
 
 
 def _set_rails(data):
-    raw = json.dumps(data, separators=(",", ":")).encode()
-    RAILS.update(raw=raw, gz=gzip.compress(raw, 6), state="ready", built=data.get("built"))
+    """Prepara los 4 niveles de detalle (3 = completo ... 0 = solo líneas principales, muy simplificado)."""
+    ways = []
+    for flags, pts in data["ways"]:
+        if len(pts) < 2:
+            continue
+        lats = [p[0] for p in pts]
+        lons = [p[1] for p in pts]
+        ways.append((flags, pts, (min(lats), min(lons), max(lats), max(lons))))
+    levels = {3: ways}
+    for lvl in (2, 1, 0):
+        eps, out = LEVEL_EPS[lvl], []
+        for flags, pts, bb in levels[lvl + 1]:
+            if lvl <= 1 and not flags & (FLAG_HS | FLAG_MAIN):
+                continue                                   # a zoom bajo, solo líneas principales
+            if lvl <= 1 and max(bb[2] - bb[0], bb[3] - bb[1]) < eps * 2:
+                continue                                   # tramos diminutos
+            q = rdp(pts, eps)
+            if len(q) >= 2:
+                out.append((flags, q, bb))
+        levels[lvl] = out
+    RAILS.update(levels=levels, built=data.get("built"), complete=bool(data.get("complete")), state="ready")
+    log("Niveles de detalle de las vías: " + ", ".join("%d→%d tramos" % (k, len(v)) for k, v in sorted(levels.items())))
+
+
+def rails_query(z, bbox):
+    lvl = level_for_zoom(z)
+    hs, std = [], []
+    for flags, pts, bb in RAILS["levels"].get(lvl, []):
+        if bbox and (bb[2] < bbox[0] or bb[0] > bbox[2] or bb[3] < bbox[1] or bb[1] > bbox[3]):
+            continue
+        (hs if flags & FLAG_HS else std).append(pts)
+    return {"level": lvl, "built": RAILS["built"], "complete": RAILS["complete"], "hs": hs, "std": std}
 
 
 # ---------------------------------------------------------------- servidor HTTP
@@ -395,13 +470,22 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/api/rails":
             if RAILS["state"] != "ready":
                 return self._json(503, {"state": RAILS["state"], "tiles": RAILS["tiles"], "error": RAILS["error"]})
+            qs = urllib.parse.parse_qs(self.path.split("?", 1)[1]) if "?" in self.path else {}
+            try:
+                z = int(float(qs.get("z", ["7"])[0]))
+                bbox = [float(x) for x in qs["bbox"][0].split(",")] if "bbox" in qs else None
+                if bbox and len(bbox) != 4:
+                    bbox = None
+            except ValueError:
+                return self._json(400, {"error": "parámetros z/bbox no válidos"})
+            body = json.dumps(rails_query(z, bbox), separators=(",", ":")).encode()
             if "gzip" in self.headers.get("Accept-Encoding", ""):
-                self._send(200, RAILS["gz"], "application/json", {"Content-Encoding": "gzip"})
+                self._send(200, gzip.compress(body, 3), "application/json", {"Content-Encoding": "gzip"})
             else:
-                self._send(200, RAILS["raw"], "application/json")
+                self._send(200, body, "application/json")
         elif path == "/api/status":
             self._json(200, {"static": {k: STATIC[k] for k in ("ready", "error", "n_trips")},
-                             "rails": {k: RAILS[k] for k in ("state", "error", "built", "tiles")}})
+                             "rails": {k: RAILS[k] for k in ("state", "error", "built", "tiles", "complete")}})
         else:
             self._send(404, b"No encontrado", "text/plain; charset=utf-8")
 

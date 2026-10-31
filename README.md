@@ -5,18 +5,20 @@ Mapa en tiempo real de los trenes de Renfe (Cercanías/Rodalies y Alta Velocidad
 ## Instalar y ejecutar
 
 ```bash
-git clone https://github.com/TU_USUARIO/renfe-trenes.git
-cd renfe-trenes
+git clone https://github.com/DCanoOtt/trains-of-spain.git
+cd trains-of-spain
 python3 server.py        # puerto 8765 por defecto; opcional: python3 server.py 9000
 ```
 
 Abre http://127.0.0.1:8765. Solo hace falta Python 3.8 o superior (sin dependencias). Hay que abrir la página a través del servidor: abrir `index.html` con doble clic no da tipos de tren ni retrasos.
 
-**Primera ejecución.** El servidor descarga y guarda en `.cache/`:
-1. el GTFS estático de Renfe, para conocer el tipo, el número y el destino de cada tren;
-2. el trazado de las vías desde OpenStreetMap (Overpass), en 15 zonas.
+**Primera ejecución.** El servidor descarga:
+1. el GTFS estático de Renfe (en `.cache/`), para conocer el tipo, el número y el destino de cada tren;
+2. el trazado de las vías desde OpenStreetMap (Overpass), en 15 zonas, que guarda en `data/rails.json`.
 
-Puede tardar entre 1 y 10 minutos; mientras tanto la página funciona y avisa del estado. Después arranca al instante. Para volver a descargarlo todo, borra la carpeta `.cache/`. Estado en http://127.0.0.1:8765/api/status
+Puede tardar entre 1 y 10 minutos; mientras tanto la página funciona, muestra OpenRailwayMap y avisa del estado. Después arranca en pocos segundos. Estado en http://127.0.0.1:8765/api/status
+
+**Saltarse la espera de las vías.** `data/rails.json` no está en `.gitignore`: tras la primera descarga puedes hacer `git add data/rails.json && git commit && git push` y quien clone el repositorio ya tendrá las vías (~15 MB). Para regenerarlas, borra `data/rails.json` y reinicia. Para regenerar el GTFS, borra `.cache/`.
 
 ## Funciones
 
@@ -24,10 +26,10 @@ Puede tardar entre 1 y 10 minutos; mientras tanto la página funciona y avisa de
 - Fondo de OpenStreetMap en tres versiones: **gris** (por defecto), oscuro y en color. No necesitan clave.
 - Vías, a elegir:
   - **OpenRailwayMap** (por defecto): capa de imágenes con todas las vías.
-  - **Vectoriales (servidor):** red completa dibujada en vectores a partir de la caché de `server.py`; alta velocidad en rojo.
+  - **Vectoriales (servidor):** dibujadas en vectores a partir de `data/rails.json`. El servidor solo envía lo que se ve en pantalla y con un nivel de detalle según el zoom (poco detalle de lejos, completo de cerca), por lo que carga rápido; alta velocidad en rojo.
   - **Vectoriales por zona:** consulta directa a Overpass de lo que se ve en pantalla (hay que acercar el zoom).
   - Ocultas.
-- Si las vías vectoriales no cargan, una caja sobre el mapa explica el motivo.
+- Si las vías vectoriales aún no están listas o fallan, una caja sobre el mapa explica el motivo.
 
 **Trenes**
 - Flecha orientada según el rumbo del feed o, si no lo trae, según el movimiento del tren. Hasta que un tren se mueve una vez aparece como círculo. Los rumbos se guardan 10 minutos en el navegador.
@@ -46,7 +48,7 @@ Puede tardar entre 1 y 10 minutos; mientras tanto la página funciona y avisa de
 | Posiciones | `gtfsrt.renfe.com/vehicle_positions.json` (Cercanías) y `vehicle_positions_LD.json` (AV/LD/MD) |
 | Retrasos y supresiones | `gtfsrt.renfe.com/trip_updates.json` y `trip_updates_LD.json` |
 | Tipo, número y destino | GTFS estático `ssl.renfe.com/gtransit/Fichero_AV_LD/google_transit.zip` |
-| Vías (vectoriales) | OpenStreetMap vía Overpass, simplificadas y cacheadas por el servidor |
+| Vías (vectoriales) | OpenStreetMap vía Overpass, simplificadas por el servidor en 4 niveles de detalle |
 | Vías (imágenes) | OpenRailwayMap |
 | Fondo | OpenStreetMap (gris y oscuro con filtros CSS) |
 
