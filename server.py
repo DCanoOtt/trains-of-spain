@@ -30,13 +30,34 @@ from concurrent.futures import ThreadPoolExecutor
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-# Certificados HTTPS: en macOS (Python de python.org) y en el ejecutable no hay certificados del
-# sistema; si está certifi (se incluye en el ejecutable) se usa, y si no, el almacén del sistema.
-try:
-    import certifi
-    _ctx = ssl.create_default_context(cafile=certifi.where())
-except Exception:
-    _ctx = ssl.create_default_context()
+# Certificados HTTPS. Orden: variable SSL_CERT_FILE -> almacén del sistema (truststore: reconoce los
+# certificados corporativos/antivirus que reemplazan los de la web) -> certifi -> valores por defecto.
+# Último recurso, solo para datos públicos de Renfe: --insecure (o RENFE_INSECURE=1) no verifica certificados.
+import os
+
+
+def _make_ctx():
+    if "--insecure" in sys.argv or os.environ.get("RENFE_INSECURE") == "1":
+        c = ssl.create_default_context()
+        c.check_hostname = False
+        c.verify_mode = ssl.CERT_NONE
+        print("AVISO: verificación de certificados desactivada (--insecure)")
+        return c
+    if os.environ.get("SSL_CERT_FILE"):
+        return ssl.create_default_context(cafile=os.environ["SSL_CERT_FILE"])
+    try:
+        import truststore
+        return truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    except Exception:
+        pass
+    try:
+        import certifi
+        return ssl.create_default_context(cafile=certifi.where())
+    except Exception:
+        return ssl.create_default_context()
+
+
+_ctx = _make_ctx()
 urllib.request.install_opener(urllib.request.build_opener(urllib.request.HTTPSHandler(context=_ctx)))
 
 _args = [a for a in sys.argv[1:] if not a.startswith("--")]

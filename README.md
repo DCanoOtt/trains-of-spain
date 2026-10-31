@@ -35,14 +35,16 @@ El de macOS se compila en un runner Apple silicon (`macos-15`).
 
 | Sistema | Comandos | Resultado |
 |---|---|---|
-| **Windows** (PowerShell) | `py -m pip install pyinstaller certifi`<br>`py build.py` | `dist\MonitorTrenesRenfe.exe` |
-| **macOS** (Apple silicon) | `python3 -m pip install pyinstaller certifi`<br>`python3 build.py` | `dist/MonitorTrenesRenfe` |
-| **Linux** | `python3 -m pip install pyinstaller certifi` (o `pip install --break-system-packages pyinstaller certifi`)<br>`python3 build.py` | `dist/MonitorTrenesRenfe` |
+| **Windows** (PowerShell) | `py -m pip install pyinstaller certifi truststore`<br>`py build.py` | `dist\MonitorTrenesRenfe.exe` |
+| **macOS** (Apple silicon) | `python3 -m pip install pyinstaller certifi truststore`<br>`python3 build.py` | `dist/MonitorTrenesRenfe` |
+| **Linux** | `python3 -m pip install pyinstaller certifi truststore` (o `pip install --break-system-packages pyinstaller certifi truststore`)<br>`python3 build.py` | `dist/MonitorTrenesRenfe` |
 
 **Ejecutarlo**
 - **Windows:** doble clic. Si SmartScreen avisa: *Más información* → *Ejecutar de todos modos*.
 - **macOS:** un archivo descargado queda bloqueado. En la terminal: `chmod +x MonitorTrenesRenfe && xattr -d com.apple.quarantine MonitorTrenesRenfe && ./MonitorTrenesRenfe`. Un binario de Apple silicon no funciona en un Mac Intel.
 - **Linux:** `chmod +x MonitorTrenesRenfe && ./MonitorTrenesRenfe`.
+
+**Errores de certificado (`CERTIFICATE_VERIFY_FAILED`).** Pasa en redes que inspeccionan el HTTPS (empresa, antivirus, VPN). El programa usa el almacén de certificados del sistema, que normalmente ya incluye el de tu red. Si aun así falla: `SSL_CERT_FILE=/ruta/certificado.pem ./MonitorTrenesRenfe`, o como último recurso `./MonitorTrenesRenfe --insecure` (no verifica certificados; solo para estos datos públicos).
 
 **Detalles.** Si existe `data/rails.json` al compilar, se incluye dentro y se copia junto al ejecutable la primera vez, de modo que no hay que esperar la descarga de las vías. Los datos (`.cache/`, `data/`) se guardan en la carpeta del ejecutable. Puerto opcional: `MonitorTrenesRenfe 9000`. Con `python3 server.py --open` también se abre el navegador.
 

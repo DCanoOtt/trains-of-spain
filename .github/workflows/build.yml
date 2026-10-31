@@ -29,7 +29,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install pyinstaller certifi
+      - run: pip install pyinstaller certifi truststore
       - run: python build.py
       - name: Renombrar
         shell: bash
