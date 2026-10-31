@@ -17,7 +17,7 @@ jobs:
           - os: windows-latest
             asset: MonitorTrenesRenfe-windows.exe
             file: dist/MonitorTrenesRenfe.exe
-          - os: macos-14            # Apple silicon (M1/M2/M3/M4)
+          - os: macos-15            # Apple silicon (arm64)
             asset: MonitorTrenesRenfe-macos-arm64
             file: dist/MonitorTrenesRenfe
           - os: ubuntu-latest

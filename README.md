@@ -29,7 +29,7 @@ El ejecutable es un solo archivo que arranca el servidor y abre el navegador. Py
 2. En la pestaña **Actions** → **Ejecutables** → **Run workflow**. Al terminar, los tres archivos están en la parte inferior de la ejecución (*Artifacts*).
 3. Para publicarlos como release: `git tag v1.0 && git push origin v1.0`. Los adjunta solos a la release `v1.0`.
 
-El de macOS se compila en un runner Apple silicon (`macos-14`).
+El de macOS se compila en un runner Apple silicon (`macos-15`).
 
 **A mano.** En los tres sistemas hace falta Python 3.8 o superior y los mismos pasos, desde la carpeta del proyecto:
 
