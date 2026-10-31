@@ -1,0 +1,45 @@
+name: Ejecutables
+
+on:
+  workflow_dispatch:        # manual: pestaña Actions -> Ejecutables -> Run workflow
+  push:
+    tags: ["v*"]            # o al crear una etiqueta, p. ej. v1.0
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            asset: MonitorTrenesRenfe-windows.exe
+            file: dist/MonitorTrenesRenfe.exe
+          - os: macos-14            # Apple silicon (M1/M2/M3/M4)
+            asset: MonitorTrenesRenfe-macos-arm64
+            file: dist/MonitorTrenesRenfe
+          - os: ubuntu-latest
+            asset: MonitorTrenesRenfe-linux
+            file: dist/MonitorTrenesRenfe
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install pyinstaller
+      - run: python build.py
+      - name: Renombrar
+        shell: bash
+        run: mv "${{ matrix.file }}" "dist/${{ matrix.asset }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset }}
+          path: dist/${{ matrix.asset }}
+      - name: Adjuntar a la release (solo con etiqueta)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/${{ matrix.asset }}

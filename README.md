@@ -20,6 +20,32 @@ Puede tardar entre 1 y 10 minutos; mientras tanto la página funciona, muestra O
 
 **Saltarse la espera de las vías.** `data/rails.json` no está en `.gitignore`: tras la primera descarga puedes hacer `git add data/rails.json && git commit && git push` y quien clone el repositorio ya tendrá las vías (~15 MB). Para regenerarlas, borra `data/rails.json` y reinicia. Para regenerar el GTFS, borra `.cache/`.
 
+## Crear un ejecutable (sin necesitar Python)
+
+El ejecutable es un solo archivo que arranca el servidor y abre el navegador. PyInstaller no compila para otro sistema: hay que generarlo en el sistema de destino, a mano o con GitHub Actions.
+
+**Automático con GitHub Actions (recomendado).** El archivo `.github/workflows/build.yml` compila los tres a la vez:
+1. Sube el repositorio a GitHub.
+2. En la pestaña **Actions** → **Ejecutables** → **Run workflow**. Al terminar, los tres archivos están en la parte inferior de la ejecución (*Artifacts*).
+3. Para publicarlos como release: `git tag v1.0 && git push origin v1.0`. Los adjunta solos a la release `v1.0`.
+
+El de macOS se compila en un runner Apple silicon (`macos-14`).
+
+**A mano.** En los tres sistemas hace falta Python 3.8 o superior y los mismos pasos, desde la carpeta del proyecto:
+
+| Sistema | Comandos | Resultado |
+|---|---|---|
+| **Windows** (PowerShell) | `py -m pip install pyinstaller`<br>`py build.py` | `dist\MonitorTrenesRenfe.exe` |
+| **macOS** (Apple silicon) | `python3 -m pip install pyinstaller`<br>`python3 build.py` | `dist/MonitorTrenesRenfe` |
+| **Linux** | `python3 -m pip install pyinstaller` (o `pip install --break-system-packages pyinstaller`)<br>`python3 build.py` | `dist/MonitorTrenesRenfe` |
+
+**Ejecutarlo**
+- **Windows:** doble clic. Si SmartScreen avisa: *Más información* → *Ejecutar de todos modos*.
+- **macOS:** un archivo descargado queda bloqueado. En la terminal: `chmod +x MonitorTrenesRenfe && xattr -d com.apple.quarantine MonitorTrenesRenfe && ./MonitorTrenesRenfe`. Un binario de Apple silicon no funciona en un Mac Intel.
+- **Linux:** `chmod +x MonitorTrenesRenfe && ./MonitorTrenesRenfe`.
+
+**Detalles.** Si existe `data/rails.json` al compilar, se incluye dentro y se copia junto al ejecutable la primera vez, de modo que no hay que esperar la descarga de las vías. Los datos (`.cache/`, `data/`) se guardan en la carpeta del ejecutable. Puerto opcional: `MonitorTrenesRenfe 9000`. Con `python3 server.py --open` también se abre el navegador.
+
 ## Funciones
 
 **Mapa**

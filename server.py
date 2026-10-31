@@ -29,8 +29,11 @@ from concurrent.futures import ThreadPoolExecutor
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-PORT = int(sys.argv[1]) if len(sys.argv) > 1 else 8765
-HERE = Path(__file__).resolve().parent
+_args = [a for a in sys.argv[1:] if not a.startswith("--")]
+PORT = int(_args[0]) if _args else 8765
+FROZEN = getattr(sys, "frozen", False)          # True dentro del ejecutable (PyInstaller)
+RES = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))   # recursos empaquetados
+HERE = Path(sys.executable).resolve().parent if FROZEN else Path(__file__).resolve().parent  # datos junto al ejecutable
 CACHE_DIR = HERE / ".cache"
 CACHE_DIR.mkdir(exist_ok=True)
 FEED_TTL = 15  # segundos
@@ -460,7 +463,7 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         path = self.path.split("?", 1)[0]
         if path in ("/", "/index.html"):
-            self._send(200, (HERE / "index.html").read_bytes(), "text/html; charset=utf-8")
+            self._send(200, (RES / "index.html").read_bytes(), "text/html; charset=utf-8")
         elif path in ("/api/cercanias", "/api/larga"):
             kind = path[5:]
             obj, err = get_json(VEHICLES[kind])
@@ -491,6 +494,14 @@ class Handler(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
+    # Primera vez en el ejecutable: copia las vías precalculadas incluidas dentro del paquete
+    _seed = RES / "data" / "rails.json"
+    if FROZEN and _seed.exists() and not (DATA_DIR / "rails.json").exists():
+        DATA_DIR.mkdir(exist_ok=True)
+        (DATA_DIR / "rails.json").write_bytes(_seed.read_bytes())
+    if FROZEN or "--open" in sys.argv:
+        import webbrowser
+        threading.Timer(1.2, lambda: webbrowser.open("http://127.0.0.1:%d" % PORT)).start()
     threading.Thread(target=load_static, daemon=True).start()
     threading.Thread(target=build_rails, daemon=True).start()
     srv = ThreadingHTTPServer(("127.0.0.1", PORT), Handler)
