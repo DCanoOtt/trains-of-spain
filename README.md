@@ -35,9 +35,9 @@ El de macOS se compila en un runner Apple silicon (`macos-15`).
 
 | Sistema | Comandos | Resultado |
 |---|---|---|
-| **Windows** (PowerShell) | `py -m pip install pyinstaller`<br>`py build.py` | `dist\MonitorTrenesRenfe.exe` |
-| **macOS** (Apple silicon) | `python3 -m pip install pyinstaller`<br>`python3 build.py` | `dist/MonitorTrenesRenfe` |
-| **Linux** | `python3 -m pip install pyinstaller` (o `pip install --break-system-packages pyinstaller`)<br>`python3 build.py` | `dist/MonitorTrenesRenfe` |
+| **Windows** (PowerShell) | `py -m pip install pyinstaller certifi`<br>`py build.py` | `dist\MonitorTrenesRenfe.exe` |
+| **macOS** (Apple silicon) | `python3 -m pip install pyinstaller certifi`<br>`python3 build.py` | `dist/MonitorTrenesRenfe` |
+| **Linux** | `python3 -m pip install pyinstaller certifi` (o `pip install --break-system-packages pyinstaller certifi`)<br>`python3 build.py` | `dist/MonitorTrenesRenfe` |
 
 **Ejecutarlo**
 - **Windows:** doble clic. Si SmartScreen avisa: *Más información* → *Ejecutar de todos modos*.

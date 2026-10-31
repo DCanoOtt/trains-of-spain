@@ -19,6 +19,7 @@ import gzip
 import io
 import json
 import re
+import ssl
 import sys
 import threading
 import time
@@ -28,6 +29,15 @@ import zipfile
 from concurrent.futures import ThreadPoolExecutor
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+
+# Certificados HTTPS: en macOS (Python de python.org) y en el ejecutable no hay certificados del
+# sistema; si está certifi (se incluye en el ejecutable) se usa, y si no, el almacén del sistema.
+try:
+    import certifi
+    _ctx = ssl.create_default_context(cafile=certifi.where())
+except Exception:
+    _ctx = ssl.create_default_context()
+urllib.request.install_opener(urllib.request.build_opener(urllib.request.HTTPSHandler(context=_ctx)))
 
 _args = [a for a in sys.argv[1:] if not a.startswith("--")]
 PORT = int(_args[0]) if _args else 8765
